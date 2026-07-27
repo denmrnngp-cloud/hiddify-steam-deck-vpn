@@ -4,6 +4,33 @@
 
 <img src="https://raw.githubusercontent.com/denmrnngp-cloud/hiddify-steam-deck-vpn/main/assets/stats-ticker.svg" alt="Live project stats: weekly downloads, repository visits, clones, stars, and star request" width="100%"/>
 
+## 💖 Support This Project
+
+<p>
+  <img src="https://img.shields.io/badge/USDT-ERC--20-26A17B?logo=tether&logoColor=white" alt="USDT"/>
+  <img src="https://img.shields.io/badge/BTC-Bitcoin-F7931A?logo=bitcoin&logoColor=white" alt="BTC"/>
+  <img src="https://img.shields.io/badge/TON-The%20Open%20Network-0088CC?logo=ton&logoColor=white" alt="TON"/>
+</p>
+
+This is an **open-source project**, developed and improved in my free time. Planned next: **integrations with other VPN services** inside this project, and further **improvements for running on Steam Deck / SteamOS**. If Hiddify for Steam Deck has been useful to you, a donation helps keep it going.
+
+Hover a code block below and click the copy icon to copy the address.
+
+**USDT (ERC-20)**
+```
+0x71ffE9AEEdf00dA295a8ef1153068e04d96439a9
+```
+
+**BTC**
+```
+bc1qgr96dt68gzuwwmuezp5e57cvhfnzt74ekfslav
+```
+
+**TON**
+```
+UQB-ryq31AxfEfxjr4jb0Ex_-JUZlEIXEeb58MnD1aXJAosx
+```
+
 > **Unofficial Steam Deck / SteamOS port of [hiddify/hiddify-app](https://github.com/hiddify/hiddify-app)**
 > Desktop Mode Hiddify client installer + Decky Loader Game Mode VPN plugin.
 > Powered by [sing-box](https://github.com/SagerNet/sing-box) · Supports VLESS/Reality, VMess, Trojan, Hysteria 2, TUIC, Shadowsocks
