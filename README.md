@@ -7,7 +7,8 @@
 ## 💖 Support This Project
 
 <p>
-  <img src="https://img.shields.io/badge/USDT-ERC--20-26A17B?logo=tether&logoColor=white" alt="USDT"/>
+  <img src="https://img.shields.io/badge/USDT-ERC--20-26A17B?logo=tether&logoColor=white" alt="USDT ERC-20"/>
+  <img src="https://img.shields.io/badge/USDT-Solana-9945FF?logo=solana&logoColor=white" alt="USDT Solana"/>
   <img src="https://img.shields.io/badge/BTC-Bitcoin-F7931A?logo=bitcoin&logoColor=white" alt="BTC"/>
   <img src="https://img.shields.io/badge/TON-The%20Open%20Network-0088CC?logo=ton&logoColor=white" alt="TON"/>
 </p>
@@ -19,6 +20,11 @@ Hover a code block below and click the copy icon to copy the address.
 **USDT (ERC-20)**
 ```
 0x71ffE9AEEdf00dA295a8ef1153068e04d96439a9
+```
+
+**USDT (Solana)**
+```
+Fzjim8rgaP2yYRVaZNdYfpnrNkcQw1LFnnaZeXwuWoNk
 ```
 
 **BTC**
