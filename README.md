@@ -7,7 +7,6 @@
 ## 💖 Support This Project
 
 <p>
-  <img src="https://img.shields.io/badge/USDT-ERC--20-26A17B?logo=tether&logoColor=white" alt="USDT ERC-20"/>
   <img src="https://img.shields.io/badge/USDT-Solana-9945FF?logo=solana&logoColor=white" alt="USDT Solana"/>
   <img src="https://img.shields.io/badge/BTC-Bitcoin-F7931A?logo=bitcoin&logoColor=white" alt="BTC"/>
   <img src="https://img.shields.io/badge/ETH-Ethereum-3C3C3D?logo=ethereum&logoColor=white" alt="ETH"/>
@@ -17,11 +16,6 @@
 This is an **open-source project**, developed and improved in my free time. Planned next: **integrations with other VPN services** inside this project, and further **improvements for running on Steam Deck / SteamOS**. If Hiddify for Steam Deck has been useful to you, a donation helps keep it going.
 
 Hover a code block below and click the copy icon to copy the address.
-
-**USDT (ERC-20)**
-```
-0x71ffE9AEEdf00dA295a8ef1153068e04d96439a9
-```
 
 **USDT (Solana)**
 ```
