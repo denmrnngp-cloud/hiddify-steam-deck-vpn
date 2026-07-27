@@ -10,6 +10,7 @@
   <img src="https://img.shields.io/badge/USDT-ERC--20-26A17B?logo=tether&logoColor=white" alt="USDT ERC-20"/>
   <img src="https://img.shields.io/badge/USDT-Solana-9945FF?logo=solana&logoColor=white" alt="USDT Solana"/>
   <img src="https://img.shields.io/badge/BTC-Bitcoin-F7931A?logo=bitcoin&logoColor=white" alt="BTC"/>
+  <img src="https://img.shields.io/badge/ETH-Ethereum-3C3C3D?logo=ethereum&logoColor=white" alt="ETH"/>
   <img src="https://img.shields.io/badge/TON-The%20Open%20Network-0088CC?logo=ton&logoColor=white" alt="TON"/>
 </p>
 
@@ -30,6 +31,11 @@ Fzjim8rgaP2yYRVaZNdYfpnrNkcQw1LFnnaZeXwuWoNk
 **BTC**
 ```
 bc1qgr96dt68gzuwwmuezp5e57cvhfnzt74ekfslav
+```
+
+**ETH**
+```
+0x71ffE9AEEdf00dA295a8ef1153068e04d96439a9
 ```
 
 **TON**
