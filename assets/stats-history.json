@@ -1,24 +1,6 @@
 {
   "points": [
     {
-      "timestamp": "2026-06-13T10:08:29.248Z",
-      "totalDownloads": 1095,
-      "stars": 15,
-      "views14d": 671,
-      "viewUniques14d": 158,
-      "clones14d": 509,
-      "cloneUniques14d": 71
-    },
-    {
-      "timestamp": "2026-06-13T12:04:03.858Z",
-      "totalDownloads": 1095,
-      "stars": 15,
-      "views14d": 671,
-      "viewUniques14d": 158,
-      "clones14d": 509,
-      "cloneUniques14d": 71
-    },
-    {
       "timestamp": "2026-06-13T14:30:19.930Z",
       "totalDownloads": 1101,
       "stars": 15,
@@ -3719,6 +3701,15 @@
     },
     {
       "timestamp": "2026-07-28T09:57:50.971Z",
+      "totalDownloads": 4159,
+      "stars": 21,
+      "views14d": 671,
+      "viewUniques14d": 158,
+      "clones14d": 509,
+      "cloneUniques14d": 71
+    },
+    {
+      "timestamp": "2026-07-28T12:15:39.488Z",
       "totalDownloads": 4159,
       "stars": 21,
       "views14d": 671,
