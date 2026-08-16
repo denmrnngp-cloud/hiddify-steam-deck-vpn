@@ -84,7 +84,7 @@ const getProfiles      = callable<[], Array<{ id: string; name: string; active: 
 const switchProfile    = callable<[string], { success: boolean; message: string }>("switch_profile");
 const getProfileServers = callable<[string], ServerInfo>("get_profile_servers");
 const switchServer      = callable<[string, string, string], { success: boolean; message: string }>("switch_server");
-const refreshProfile    = callable<[string], { success: boolean; message: string; server_count?: number; selectable?: boolean }>("refresh_profile");
+const refreshProfile    = callable<[string], { success: boolean; message: string; server_count?: number; selectable?: boolean; applied?: boolean }>("refresh_profile");
 
 interface VpnStatus {
   connected: boolean; running: boolean; vpn_ip: string; install_state: string; active_profile: string;
@@ -244,14 +244,10 @@ function VpnPanel() {
   const handleRefreshProfile = async (profileId: string) => {
     if (!profileId || !dedupe(`refresh:${profileId}`)) return;
     if (refreshingProfileId) return;
-    if (loading || status.running || status.connected) {
-      toaster.toast({
-        title: "Hiddify VPN",
-        body: "Turn the VPN off first, then update the server list",
-        duration: 4000,
-      });
-      return;
-    }
+    // Refresh is allowed while the VPN is active: the plugin downloads the
+    // subscription through tun0 and saves it to configs/<id>.json, then defers
+    // rebuilding current-config.json until the next stop/start (start_vpn does
+    // it automatically). No VPN drop, no config mutation of the live session.
     setRefreshingProfileId(profileId);
     try {
       const r = await refreshProfile(profileId);
@@ -260,7 +256,13 @@ function VpnPanel() {
         const currentActive = profiles.find(p => p.active);
         await fetchServerInfo(profileId === currentActive?.id ? profileId : currentActive?.id);
         await fetchStatus();
-        toaster.toast({ title: "Hiddify VPN", body: r.message, duration: 3000 });
+        toaster.toast({
+          title: "Hiddify VPN",
+          body: r.applied === false
+            ? `${r.message} · saved (applies on next VPN start)`
+            : r.message,
+          duration: 4000,
+        });
       } else {
         toaster.toast({ title: "Update Error", body: r.message, duration: 5000 });
       }
@@ -340,8 +342,8 @@ function VpnPanel() {
                     <FocusButton
                       role="button"
                       aria-label={`Update ${p.name}`}
-                      aria-disabled={isBusy || Boolean(refreshingProfileId)}
-                      title={isBusy ? "Stop VPN before updating" : `Update ${p.name}`}
+                      aria-disabled={Boolean(refreshingProfileId)}
+                      title={refreshingProfileId === p.id ? `Updating ${p.name}...` : `Update ${p.name}`}
                       onActivate={(ev: any) => {
                         ev?.stopPropagation?.();
                         handleRefreshProfile(p.id);

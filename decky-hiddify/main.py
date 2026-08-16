@@ -1420,7 +1420,7 @@ WantedBy=default.target
         SteamOS CA bundle; on a CA-verification failure only, retries once with
         verification disabled so odd/self-signed endpoints still work (the
         downloaded payload is validated by HiddifyCli parse afterwards)."""
-        request = urllib.request.Request(url, headers={"User-Agent": "hiddify-steam-deck/1.3.17"})
+        request = urllib.request.Request(url, headers={"User-Agent": "hiddify-steam-deck/1.3.18-beta"})
         info = {"tls_verified": True}
         try:
             with urllib.request.urlopen(request, timeout=30, context=self._ssl_context_for_download()) as response:
@@ -1731,9 +1731,17 @@ WantedBy=default.target
             grpc_up=grpc_up,
             service=service,
         )
-        if self._is_tun_up() or tun_exists or grpc_up or self._service_is_active(service):
-            self._debug_event("refresh_profile.blocked_running", profile_id=profile_id)
-            return {"success": False, "message": "Stop VPN before updating servers"}
+        # Deferred apply: if the VPN is active we still download + parse the
+        # subscription (download goes through tun0, which is exactly what
+        # geo-blocked users need), and save it to configs/<id>.json. We skip
+        # rebuilding current-config.json because the running HiddifyCli holds
+        # its config in memory and does not hot-reload the file. start_vpn()
+        # already calls _sync_active_profile_config() -> _rebuild_config(),
+        # so the fresh config is applied automatically on the next stop/start
+        # the user initiates. This avoids any VPN drop during refresh.
+        vpn_active = self._is_tun_up() or tun_exists or grpc_up or self._service_is_active(service)
+        if vpn_active:
+            self._debug_event("refresh_profile.vpn_active_deferred", profile_id=profile_id)
 
         meta = self._profile_meta(profile_id)
         if not meta.get("exists"):
@@ -1751,16 +1759,27 @@ WantedBy=default.target
 
         info = self._profile_server_info(profile_id)
         selection_reset = self._reset_invalid_server_selection(profile_id, info)
-        rebuild = self._rebuild_config(profile_id)
-        if not rebuild.get("success", False):
+
+        applied = False
+        rebuild = {}
+        if not vpn_active:
+            rebuild = self._rebuild_config(profile_id)
+            if not rebuild.get("success", False):
+                self._debug_event(
+                    "refresh_profile.rebuild_failed",
+                    profile_id=profile_id,
+                    parse=parse_result,
+                    selection_reset=selection_reset,
+                    rebuild=rebuild,
+                )
+                return {"success": False, "message": "Updated subscription, but failed to rebuild config. Open Logs."}
+            applied = True
+        else:
             self._debug_event(
-                "refresh_profile.rebuild_failed",
+                "refresh_profile.rebuild_skipped_vpn_active",
                 profile_id=profile_id,
-                parse=parse_result,
-                selection_reset=selection_reset,
-                rebuild=rebuild,
+                note="current-config.json untouched; start_vpn will rebuild from configs/<id>.json on next start",
             )
-            return {"success": False, "message": "Updated subscription, but failed to rebuild config. Open Logs."}
 
         last_update = self._update_profile_last_update(profile_id)
         refreshed_info = self._profile_server_info(profile_id)
@@ -1771,15 +1790,18 @@ WantedBy=default.target
             parse=parse_result,
             selection_reset=selection_reset,
             rebuild=rebuild,
+            applied=applied,
             last_update=last_update,
             server_info=refreshed_info,
         )
         count = refreshed_info.get("count", 0)
+        message = f"Servers updated: {count}"
         return {
             "success": True,
-            "message": f"Servers updated: {count}",
+            "message": message,
             "server_count": count,
             "selectable": bool(refreshed_info.get("selectable")),
+            "applied": applied,
         }
 
     async def switch_profile(self, profile_id: str) -> dict:
