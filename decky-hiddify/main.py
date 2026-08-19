@@ -34,6 +34,7 @@ SERVER_SELECTION_PATH = f"{APP_DIR}/decky-server-selection.json"
 USER_SERVICE_PATH = "/home/deck/.config/systemd/user/hiddify.service"
 
 GRPC_PORT = 17078  # GUI in-process gRPC port
+CLASH_API_PORT = 16756  # sing-box Clash-compatible control API (hot reload)
 SYSTEMD_START_TIMEOUT = 30
 CORE_GENERATED_TAGS = {"auto", "balance", "lowest", "select"}
 HIDDEN_OUTBOUND_TYPES = {"selector", "urltest", "balancer", "direct", "block", "dns"}
@@ -210,6 +211,47 @@ class Plugin:
             decky.logger.info(f"gRPC Start sent, response: {result.hex() if result else 'empty'}")
             return True
         return False
+
+    # ── Clash API hot reload ───────────────────────────────────────────────────
+    # sing-box exposes a Clash-compatible control API on 127.0.0.1:16756
+    # (enabled via decky-hiddify-settings.json: enable-clash-api / clash-api-port).
+    # PUT /configs {path} hot-reloads the running box from a config file WITHOUT
+    # tearing down tun0 — verified on a Steam Deck (sing-box 1.13.1): tun0 stays
+    # UP across the reload. This lets us apply a freshly rebuilt config to an
+    # active VPN session with zero drop, which gRPC Core.Start/Stop cannot do
+    # (those recreate tun0). Used by refresh_profile(apply_now=True).
+
+    def _clash_reload_config(self, config_path: str = CONFIG_PATH) -> dict:
+        """Hot-reload the running sing-box from config_path via Clash API.
+
+        Returns {success, http_code, tun_up_after, error}. The reload is
+        in-process (no systemctl, no tun0 teardown); if it fails we leave the
+        running session untouched and the caller can fall back to restart.
+        """
+        import urllib.request as _u
+        import json as _j
+        result = {"success": False, "http_code": None, "tun_up_after": self._is_tun_up(), "error": None}
+        payload = _j.dumps({"path": config_path}).encode()
+        req = _u.Request(
+            f"http://127.0.0.1:{CLASH_API_PORT}/configs?force=true",
+            data=payload,
+            method="PUT",
+            headers={"Content-Type": "application/json"},
+        )
+        try:
+            with _u.urlopen(req, timeout=10) as resp:
+                result["http_code"] = resp.getcode()
+                # 204 No Content is the normal success response from sing-box
+                result["success"] = resp.getcode() in (200, 204)
+        except Exception as e:
+            result["error"] = str(e)
+            decky.logger.warning(f"Clash API PUT /configs failed: {e}")
+        await_sleep = 0
+        # brief settle — let the box re-init before we re-check tun0
+        import time as _t
+        _t.sleep(1)
+        result["tun_up_after"] = self._is_tun_up()
+        return result
 
     # ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -1420,7 +1462,7 @@ WantedBy=default.target
         SteamOS CA bundle; on a CA-verification failure only, retries once with
         verification disabled so odd/self-signed endpoints still work (the
         downloaded payload is validated by HiddifyCli parse afterwards)."""
-        request = urllib.request.Request(url, headers={"User-Agent": "hiddify-steam-deck/1.3.17"})
+        request = urllib.request.Request(url, headers={"User-Agent": "hiddify-steam-deck/1.3.18"})
         info = {"tls_verified": True}
         try:
             with urllib.request.urlopen(request, timeout=30, context=self._ssl_context_for_download()) as response:
@@ -1718,22 +1760,34 @@ WantedBy=default.target
         )
         return {"success": True, "message": message}
 
-    async def refresh_profile(self, profile_id: str) -> dict:
+    async def refresh_profile(self, profile_id: str, apply_now: bool = False) -> dict:
         service = self._service_snapshot()
         grpc_up = self._is_grpc_up()
         tun_exists = self._tun_exists()
         self._debug_event(
             "refresh_profile.entry",
             profile_id=profile_id,
+            apply_now=apply_now,
             profile_meta=self._profile_meta(profile_id),
             tun_up=self._is_tun_up(),
             tun_exists=tun_exists,
             grpc_up=grpc_up,
             service=service,
         )
-        if self._is_tun_up() or tun_exists or grpc_up or self._service_is_active(service):
-            self._debug_event("refresh_profile.blocked_running", profile_id=profile_id)
-            return {"success": False, "message": "Stop VPN before updating servers"}
+        # Deferred apply: if the VPN is active we still download + parse the
+        # subscription (download goes through tun0, which is exactly what
+        # geo-blocked users need), and save it to configs/<id>.json.
+        # - apply_now=False (default): keep the live current-config.json
+        #   untouched; start_vpn() applies the fresh config on the next
+        #   stop/start. Zero risk, zero drop.
+        # - apply_now=True: rebuild current-config.json and hot-reload the
+        #   running sing-box via the Clash API (PUT /configs) — tun0 stays up
+        #   across the reload (verified on sing-box 1.13.1). If the Clash
+        #   reload fails or tun0 drops, roll back to the previous config and
+        #   reload it so the active session keeps working.
+        vpn_active = self._is_tun_up() or tun_exists or grpc_up or self._service_is_active(service)
+        if vpn_active:
+            self._debug_event("refresh_profile.vpn_active", profile_id=profile_id, apply_now=apply_now)
 
         meta = self._profile_meta(profile_id)
         if not meta.get("exists"):
@@ -1751,16 +1805,71 @@ WantedBy=default.target
 
         info = self._profile_server_info(profile_id)
         selection_reset = self._reset_invalid_server_selection(profile_id, info)
-        rebuild = self._rebuild_config(profile_id)
-        if not rebuild.get("success", False):
+
+        applied = False
+        reload_result = {}
+        rollback = {}
+        # When the VPN is active, only rebuild+apply if the user asked for it
+        # (apply_now); otherwise keep the live config untouched (deferred).
+        if vpn_active and not apply_now:
             self._debug_event(
-                "refresh_profile.rebuild_failed",
+                "refresh_profile.rebuild_skipped_vpn_active",
                 profile_id=profile_id,
-                parse=parse_result,
-                selection_reset=selection_reset,
-                rebuild=rebuild,
+                note="current-config.json untouched; start_vpn will rebuild from configs/<id>.json on next start",
             )
-            return {"success": False, "message": "Updated subscription, but failed to rebuild config. Open Logs."}
+        elif not vpn_active or apply_now:
+            # VPN off: rebuild straight into current-config.json (applied on next start).
+            # VPN on + apply_now: rebuild into current-config.json then hot-reload
+            # via Clash API so the running session picks up the new servers now.
+            rebuild = self._rebuild_config(profile_id)
+            if not rebuild.get("success", False):
+                self._debug_event(
+                    "refresh_profile.rebuild_failed",
+                    profile_id=profile_id,
+                    parse=parse_result,
+                    selection_reset=selection_reset,
+                    rebuild=rebuild,
+                )
+                return {"success": False, "message": "Updated subscription, but failed to rebuild config. Open Logs."}
+            applied = True
+
+            if vpn_active and apply_now:
+                # Hot-reload the live sing-box. Back up the previous config first
+                # so we can roll back if the reload drops tun0.
+                ts = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+                backup_path = f"{CONFIG_PATH}.bak.{ts}"
+                try:
+                    import shutil
+                    shutil.copy2(CONFIG_PATH, backup_path)
+                except Exception as e:
+                    backup_path = ""
+                    self._debug_event("refresh_profile.backup_failed", profile_id=profile_id, error=str(e))
+                reload_result = self._clash_reload_config(CONFIG_PATH)
+                self._debug_event(
+                    "refresh_profile.clash_reload",
+                    profile_id=profile_id,
+                    backup_path=backup_path,
+                    reload=reload_result,
+                )
+                if not reload_result.get("success") or not reload_result.get("tun_up_after"):
+                    # Reload failed or tun0 dropped — roll back to the previous
+                    # working config and reload it so the live session recovers.
+                    if backup_path and os.path.exists(backup_path):
+                        try:
+                            import shutil as _sh
+                            _sh.copy2(backup_path, CONFIG_PATH)
+                            rollback = self._clash_reload_config(CONFIG_PATH)
+                        except Exception as e:
+                            rollback = {"success": False, "error": str(e)}
+                    self._debug_event("refresh_profile.rollback_after_failed_reload", profile_id=profile_id, rollback=rollback)
+                    return {
+                        "success": False,
+                        "message": "Update downloaded, but hot-reload failed — reverted to the previous config.",
+                        "applied": False,
+                        "reverted": True,
+                    }
+                # success: tun0 still up on the new config
+                applied = True
 
         last_update = self._update_profile_last_update(profile_id)
         refreshed_info = self._profile_server_info(profile_id)
@@ -1770,16 +1879,27 @@ WantedBy=default.target
             profile_meta=self._profile_meta(profile_id),
             parse=parse_result,
             selection_reset=selection_reset,
-            rebuild=rebuild,
+            reload=reload_result,
+            rollback=rollback,
+            applied=applied,
+            apply_now=apply_now,
+            vpn_active=vpn_active,
             last_update=last_update,
             server_info=refreshed_info,
         )
         count = refreshed_info.get("count", 0)
+        if applied and vpn_active and apply_now:
+            message = f"Servers updated and applied: {count}"
+        elif applied:
+            message = f"Servers updated: {count}"
+        else:
+            message = f"Servers updated: {count} \u00b7 saved (applies on next VPN start)"
         return {
             "success": True,
-            "message": f"Servers updated: {count}",
+            "message": message,
             "server_count": count,
             "selectable": bool(refreshed_info.get("selectable")),
+            "applied": applied,
         }
 
     async def switch_profile(self, profile_id: str) -> dict:

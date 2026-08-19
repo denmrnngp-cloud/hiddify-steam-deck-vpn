@@ -77,17 +77,55 @@ ANSI_RE = re.compile(r'\x1b\[[0-9;]*m')
 
 # ── Adaptive geometry ─────────────────────────────────────────────────────────
 
-def screen_geometry():
+def primary_monitor():
     display = Gdk.Display.get_default()
-    monitor = display.get_monitor(0)
-    geo = monitor.get_geometry()
+    # Prefer the primary monitor; fall back to monitor 0 so the installer still
+    # launches on compositors that misreport the primary monitor.
+    monitor = None
+    try:
+        monitor = display.get_primary_monitor()
+    except Exception:
+        monitor = None
+    if monitor is None:
+        monitor = display.get_monitor(0)
+    return monitor
+
+def workarea_geometry():
+    """Usable monitor rectangle with panels/docks excluded on all four sides.
+
+    Replaces the old get_geometry() + hardcoded -38/-28 inset, which only
+    worked when the KDE panel was top+left. get_workarea() is the compositor's
+    own knowledge of where the taskbar/dock is, so the installer adapts to any
+    panel side (bottom/right/left/top) automatically. See issue #12.
+    """
+    monitor = primary_monitor()
+    work = monitor.get_workarea()
     scale = monitor.get_scale_factor()
-    return geo.width * scale, geo.height * scale
+    return work.width * scale, work.height * scale, work.x * scale, work.y * scale
 
 def adaptive_size():
-    sw, sh = screen_geometry()
-    # KDE top panel: ~28px, left dock: ~38px (measured from xwininfo on Steam Deck)
-    return sw - 38, sh - 28
+    w, h, _x, _y = workarea_geometry()
+    return w, h
+
+def panel_insets():
+    """Diagnostic: how many px of each screen edge are occupied by a panel.
+
+    Logged to the launch log so user layout reports (issue #12) are debuggable.
+    >0 on a side means a panel/dock is there.
+    """
+    try:
+        monitor = primary_monitor()
+        full = monitor.get_geometry()
+        work = monitor.get_workarea()
+        scale = monitor.get_scale_factor()
+        return {
+            "left":   max(0, work.x - full.x) * scale,
+            "top":    max(0, work.y - full.y) * scale,
+            "right":  max(0, (full.x + full.width)  - (work.x + work.width))  * scale,
+            "bottom": max(0, (full.y + full.height) - (work.y + work.height)) * scale,
+        }
+    except Exception:
+        return {}
 
 # ── CSS ────────────────────────────────────────────────────────────────────────
 
@@ -229,6 +267,24 @@ def page_box(spacing=14):
     b = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=spacing)
     b.get_style_context().add_class("page-box")
     return b
+
+def scroll_wrap(widget):
+    """Wrap a widget in a vertical ScrolledWindow.
+
+    issue #12: on SteamOS, Gdk.Monitor.get_workarea() returns the FULL screen
+    (the compositor does not expose panel positions to clients), so neither
+    workarea-based sizing nor set_position() can keep the window clear of a
+    taskbar/dock on an arbitrary side. Wrapping page content in a
+    ScrolledWindow guarantees the always-reachable action buttons (packed
+    BELOW the scroll area) stay visible inside the window no matter where the
+    panel is or how small the window ends up.
+    """
+    sw = Gtk.ScrolledWindow()
+    sw.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+    sw.set_vexpand(True)
+    sw.set_hexpand(True)
+    sw.add(widget)
+    return sw
 
 # ── Wizard ─────────────────────────────────────────────────────────────────────
 
@@ -890,7 +946,7 @@ class AlreadyInstalledWindow(Gtk.Window):
             rb.pack_start(sub, False, False, 0)
             radio_box.pack_start(rb, False, False, 0)
 
-        cnt.pack_start(radio_box, False, False, 0)
+        cnt.pack_start(scroll_wrap(radio_box), True, True, 0)
 
         btn_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         btn_row.set_halign(Gtk.Align.END)
@@ -1079,15 +1135,30 @@ def main():
 
     apply_css()
 
+    try:
+        print("panel_insets:", panel_insets(), file=sys.stderr)
+    except Exception:
+        pass
+
     w, h = adaptive_size()
     if os.path.exists(HIDDIFY_CLI) and os.environ.get("HIDDIFY_CLEAN_INSTALL") != "1":
         win = AlreadyInstalledWindow()
         win.show_all()
         win.resize(min(w, 560), min(h, 380))
+        # issue #12: on SteamOS get_workarea() reports the full screen, so the
+        # compositor is the only reliable authority on panel placement.
+        # Maximize lets KWin place the window inside its real work area
+        # (respecting panels on any side); the radio_box is scroll-wrapped so
+        # the Next button stays reachable even if the window is short.
+        win.maximize()
     else:
         win = HiddifyWizard()
         win.show_all()
         win.resize(w, h)
+        # issue #12: let the compositor place the window inside the workarea
+        # (it respects panels on any side), so Next/Back buttons never end up
+        # hidden under a bottom/top/side taskbar.
+        win.maximize()
 
     Gtk.main()
 

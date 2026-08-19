@@ -84,7 +84,7 @@ const getProfiles      = callable<[], Array<{ id: string; name: string; active: 
 const switchProfile    = callable<[string], { success: boolean; message: string }>("switch_profile");
 const getProfileServers = callable<[string], ServerInfo>("get_profile_servers");
 const switchServer      = callable<[string, string, string], { success: boolean; message: string }>("switch_server");
-const refreshProfile    = callable<[string], { success: boolean; message: string; server_count?: number; selectable?: boolean }>("refresh_profile");
+const refreshProfile    = callable<[string, boolean], { success: boolean; message: string; server_count?: number; selectable?: boolean; applied?: boolean; reverted?: boolean }>("refresh_profile");
 
 interface VpnStatus {
   connected: boolean; running: boolean; vpn_ip: string; install_state: string; active_profile: string;
@@ -244,23 +244,29 @@ function VpnPanel() {
   const handleRefreshProfile = async (profileId: string) => {
     if (!profileId || !dedupe(`refresh:${profileId}`)) return;
     if (refreshingProfileId) return;
-    if (loading || status.running || status.connected) {
-      toaster.toast({
-        title: "Hiddify VPN",
-        body: "Turn the VPN off first, then update the server list",
-        duration: 4000,
-      });
-      return;
-    }
+    // Refresh works whether the VPN is on or off:
+    // - VPN ON: apply_now=true -> download subscription through tun0, rebuild
+    //   current-config.json, and hot-reload the running sing-box via the Clash
+    //   API (PUT /configs). tun0 stays up across the reload (verified on
+    //   sing-box 1.13.1), so the active session switches to the new servers
+    //   immediately with no drop. If the reload fails, the previous config is
+    //   restored so the live session keeps working.
+    // - VPN OFF: apply_now=false -> rebuild current-config.json; it applies on
+    //   the next start.
     setRefreshingProfileId(profileId);
+    const applyNow = Boolean(status.connected || status.running);
     try {
-      const r = await refreshProfile(profileId);
+      const r = await refreshProfile(profileId, applyNow);
       if (r.success) {
         await fetchProfiles();
         const currentActive = profiles.find(p => p.active);
         await fetchServerInfo(profileId === currentActive?.id ? profileId : currentActive?.id);
         await fetchStatus();
-        toaster.toast({ title: "Hiddify VPN", body: r.message, duration: 3000 });
+        toaster.toast({
+          title: "Hiddify VPN",
+          body: r.message,
+          duration: r.reverted ? 5000 : 3500,
+        });
       } else {
         toaster.toast({ title: "Update Error", body: r.message, duration: 5000 });
       }
@@ -340,8 +346,8 @@ function VpnPanel() {
                     <FocusButton
                       role="button"
                       aria-label={`Update ${p.name}`}
-                      aria-disabled={isBusy || Boolean(refreshingProfileId)}
-                      title={isBusy ? "Stop VPN before updating" : `Update ${p.name}`}
+                      aria-disabled={Boolean(refreshingProfileId)}
+                      title={refreshingProfileId === p.id ? `Updating ${p.name}...` : `Update ${p.name}`}
                       onActivate={(ev: any) => {
                         ev?.stopPropagation?.();
                         handleRefreshProfile(p.id);
